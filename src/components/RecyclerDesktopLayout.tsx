@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useLanguage } from '../i18n/LanguageContext';
+import { useRecyclerAuth } from '../context/RecyclerAuthContext';
 import { LanguageSelector } from './LanguageSelector';
 import { 
   Building2, 
@@ -12,7 +13,8 @@ import {
   UserCheck, 
   ShieldCheck, 
   Bell, 
-  Search
+  Search,
+  LogOut
 } from 'lucide-react';
 
 interface RecyclerDesktopLayoutProps {
@@ -23,6 +25,12 @@ export const RecyclerDesktopLayout: React.FC<RecyclerDesktopLayoutProps> = ({ ch
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useLanguage();
+  const { user, logout } = useRecyclerAuth();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/recycler/login');
+  };
 
   const navItems = [
     { label: t('recyclerNav.overview'), path: '/recycler/home', icon: LayoutDashboard },
@@ -49,7 +57,9 @@ export const RecyclerDesktopLayout: React.FC<RecyclerDesktopLayoutProps> = ({ ch
                   RECYCLER PORTAL
                 </span>
               </div>
-              <p className="text-[11px] text-slate-500 font-medium">EcoRecycle Green Tech Solutions (CPCB Licensed)</p>
+              <p className="text-[11px] text-slate-500 font-medium">
+                {user ? `${user.name} (${user.phone})` : 'EcoRecycle Green Tech Solutions (CPCB Licensed)'}
+              </p>
             </div>
           </div>
         </div>
@@ -70,23 +80,13 @@ export const RecyclerDesktopLayout: React.FC<RecyclerDesktopLayoutProps> = ({ ch
           <LanguageSelector compact={false} />
 
           <button
-            onClick={() => navigate('/collector/home')}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition-colors"
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 transition-colors"
+            title="Log Out"
           >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>{t('nav.switchToCollector')} &rarr;</span>
+            <LogOut className="w-3.5 h-3.5 text-red-600" />
+            <span>Log Out</span>
           </button>
-
-          <button className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 relative" aria-label="Notifications">
-            <Bell className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 rounded-full bg-amber-500"></span>
-          </button>
-
-          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-            <div className="w-8 h-8 rounded-lg bg-amber-100 text-amber-900 border border-amber-300 flex items-center justify-center font-bold text-xs">
-              ER
-            </div>
-          </div>
         </div>
       </header>
 

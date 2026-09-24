@@ -1,33 +1,64 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import confetti from 'canvas-confetti';
-import { useApp } from '../../context/AppContext';
 import { useLanguage } from '../../i18n/LanguageContext';
+import { authService, BackendLot } from '../../services/auth';
 import { StatusBadge } from '../../components/StatusBadge';
 import { 
   ShieldCheck, 
   Scale, 
   CheckCircle2, 
   TrendingDown,
-  Sparkles
+  Sparkles,
+  AlertCircle
 } from 'lucide-react';
 
 export const RecyclerVerifyScreen: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getLotById, completeHandover, lots } = useApp();
   const { t } = useLanguage();
 
-  const targetId = id || (lots.find((l) => l.status === 'PENDING_HANDOVER')?.id || lots[0]?.id);
-  const lot = getLotById(targetId || '');
-
-  const [verifiedWeight, setVerifiedWeight] = useState<number>(lot?.declaredWeight || 10);
+  const [lot, setLot] = useState<BackendLot | null>(null);
+  const [verifiedWeight, setVerifiedWeight] = useState<number>(10);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!lot) {
+  useEffect(() => {
+    const fetchLotDetails = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const lots = await authService.getMyLots();
+        const found = lots.find(l => l.lot_id === id || l.id.toString() === id) || lots[0];
+        if (found) {
+          setLot(found);
+          setVerifiedWeight(found.verified_weight || found.declared_weight || 10);
+        } else {
+          setError('Lot not found in assigned queue.');
+        }
+      } catch (err: any) {
+        setError(err.message || 'Failed to fetch lot details.');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLotDetails();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="text-center py-12 text-slate-500 text-xs">
+        Loading lot verification details from backend...
+      </div>
+    );
+  }
+
+  if (error || !lot) {
     return (
       <div className="text-center py-12 space-y-4">
-        <p className="text-slate-500 text-xs">{t('recycler.noIncoming')}</p>
+        <p className="text-red-600 text-xs font-semibold">{error || t('recycler.noIncoming')}</p>
         <button onClick={() => navigate('/recycler/home')} className="px-4 py-2 bg-amber-600 text-white rounded-lg font-semibold text-xs">
           {t('common.back')}
         </button>
@@ -36,36 +67,43 @@ export const RecyclerVerifyScreen: React.FC = () => {
   }
 
   const isCompleted = lot.status === 'COMPLETED';
+  const materialRate = lot.rate || 450;
 
   // CRITICAL BUSINESS RULE:
   // Final transaction payment MUST ALWAYS be calculated using Verified Weight physically weighed by recycler
-  const basePrice = lot.material.pricePerKg * verifiedWeight;
-  const bonusMultiplier = 1 + (lot.recycler.rateBonusPercent || 0) / 100;
-  const calculatedFinalPayout = Math.round(basePrice * bonusMultiplier);
+  // Formula: Final Payment = Verified Weight × Material Rate
+  const calculatedFinalPayout = Math.round(verifiedWeight * materialRate);
+  const weightDifference = verifiedWeight - lot.declared_weight;
 
-  const weightDifference = verifiedWeight - lot.declaredWeight;
-
-  const handleConfirmHandover = () => {
+  const handleConfirmHandover = async () => {
     setIsSubmitting(true);
+    setError(null);
 
     try {
-      confetti({
-        particleCount: 80,
-        spread: 60,
-        origin: { y: 0.6 },
-        colors: ['#059669', '#10B981', '#D4A72C'],
-      });
-    } catch (e) {
-      // Ignore
-    }
+      // 1. Send physical weight verification to backend
+      const verifiedLot = await authService.verifyLotWeight(lot.lot_id, verifiedWeight);
+      setLot(verifiedLot);
 
-    setTimeout(() => {
-      const updated = completeHandover(lot.id, verifiedWeight);
-      setIsSubmitting(false);
-      if (updated) {
-        navigate('/recycler/transactions');
+      // 2. Complete transaction on backend
+      await authService.completeLot(lot.lot_id, 'UPI');
+
+      try {
+        confetti({
+          particleCount: 80,
+          spread: 60,
+          origin: { y: 0.6 },
+          colors: ['#059669', '#10B981', '#D4A72C'],
+        });
+      } catch (e) {
+        // Ignore animation error
       }
-    }, 500);
+
+      navigate('/recycler/transactions');
+    } catch (err: any) {
+      setError(err.message || 'Verification failed. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -79,11 +117,18 @@ export const RecyclerVerifyScreen: React.FC = () => {
           </span>
           <StatusBadge status={lot.status} />
         </div>
-        <h1 className="text-xl font-bold text-slate-900">{t('handover.stationSubtitle')} {lot.id}</h1>
-        <p className="text-xs text-amber-900/80">{t('handover.recyclerFacility')} <strong>{lot.recycler.name}</strong></p>
+        <h1 className="text-xl font-bold text-slate-900">{t('handover.stationSubtitle')} {lot.lot_id}</h1>
+        <p className="text-xs text-amber-900/80">Collector: <strong>{lot.collector?.name || 'Assigned Collector'}</strong> ({lot.collector?.phone || ''})</p>
       </div>
 
-      {/* Serious Financial Audit Component: Declared vs Verified Weight */}
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 border border-red-200 flex items-center gap-2 text-xs font-semibold text-red-800">
+          <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {/* Financial Audit Component: Declared vs Verified Weight */}
       <div className="fintech-card p-6 space-y-5 bg-white border-slate-200">
         <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
           <h2 className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
@@ -97,14 +142,14 @@ export const RecyclerVerifyScreen: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
             <span className="text-xs text-slate-500 font-medium block">{t('handover.collectorDeclared')}</span>
-            <div className="text-2xl font-extrabold text-slate-800">{lot.declaredWeight} <span className="text-sm font-normal text-slate-500">{t('common.kg')}</span></div>
-            <p className="text-[11px] text-slate-500">{t('handover.initialEstimate')}</p>
+            <div className="text-2xl font-extrabold text-slate-800">{lot.declared_weight} <span className="text-sm font-normal text-slate-500">{t('common.kg')}</span></div>
+            <p className="text-[11px] text-slate-500">Collector Initial Estimate</p>
           </div>
 
           <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-300 space-y-1">
             <span className="text-xs text-emerald-900 font-medium block">{t('handover.recyclerVerified')}</span>
             <div className="text-2xl font-extrabold text-emerald-700">{verifiedWeight} <span className="text-sm font-normal text-emerald-900">{t('common.kg')}</span></div>
-            <p className="text-[11px] text-emerald-800 font-medium">{t('handover.digitalScaleMeasurement')}</p>
+            <p className="text-[11px] text-emerald-800 font-medium">Digital Scale Measured Weight</p>
           </div>
         </div>
 
@@ -112,7 +157,7 @@ export const RecyclerVerifyScreen: React.FC = () => {
         {!isCompleted && (
           <div className="space-y-3 pt-2 border-t border-slate-100">
             <label className="text-xs font-semibold text-slate-800 block">
-              {t('handover.enterScaleReading')}
+              Enter Physical Scale Weight Reading (kg)
             </label>
             <div className="flex items-center gap-3">
               <input
@@ -129,11 +174,11 @@ export const RecyclerVerifyScreen: React.FC = () => {
 
             {/* Quick Demo Test Values */}
             <div className="flex flex-wrap gap-2 pt-1">
-              <span className="text-[11px] text-slate-400 self-center font-medium">{t('handover.quickPreset')}</span>
+              <span className="text-[11px] text-slate-400 self-center font-medium">Quick Scale Presets:</span>
               {[
-                { label: `${t('handover.exactPreset')} (20 ${t('common.kg')})`, val: 20 },
-                { label: `${t('handover.verifiedPreset')} (10 ${t('common.kg')})`, val: 10 },
-                { label: `${t('handover.verifiedPreset')} (15 ${t('common.kg')})`, val: 15 },
+                { label: `Exact (${lot.declared_weight} kg)`, val: lot.declared_weight },
+                { label: `10 kg`, val: 10 },
+                { label: `15 kg`, val: 15 },
               ].map((p) => (
                 <button
                   key={p.label}
@@ -159,14 +204,14 @@ export const RecyclerVerifyScreen: React.FC = () => {
               <>
                 <TrendingDown className="w-4 h-4 text-amber-600 shrink-0" />
                 <span className="text-slate-700">
-                  {t('handover.weightLess')}
+                  Verified weight is {Math.abs(weightDifference)} kg lower than estimate. Final payout auto-adjusted.
                 </span>
               </>
             ) : (
               <>
                 <Sparkles className="w-4 h-4 text-emerald-600 shrink-0" />
                 <span className="text-emerald-900">
-                  {t('handover.weightMore')}
+                  Verified weight is {weightDifference} kg higher than estimate. Bonus payout added!
                 </span>
               </>
             )}
@@ -177,30 +222,23 @@ export const RecyclerVerifyScreen: React.FC = () => {
       {/* Final Settlement Box */}
       <div className="fintech-card p-6 border-emerald-200 space-y-4 bg-white">
         <div className="flex justify-between items-center text-xs text-slate-500 border-b border-slate-100 pb-3 font-semibold">
-          <span>{t('handover.settlementHeader')}</span>
-          <span className="text-emerald-700 font-bold">{t('handover.settlementAudit')}</span>
+          <span>Server Verified Payment Settlement</span>
+          <span className="text-emerald-700 font-bold">FastAPI Verified</span>
         </div>
 
         <div className="bg-slate-50 p-4 rounded-xl space-y-2.5 text-xs border border-slate-200">
           <div className="flex justify-between text-slate-600">
-            <span>{t('handover.benchmarkRate')}</span>
-            <span className="font-semibold text-slate-900">₹{lot.material.pricePerKg} / {t('common.kg')}</span>
+            <span>Material Benchmark Rate</span>
+            <span className="font-semibold text-slate-900">₹{materialRate} / kg</span>
           </div>
 
           <div className="flex justify-between text-slate-600">
-            <span>{t('handover.verifiedPhysicalWeight')}</span>
-            <span className="font-extrabold text-emerald-700">{verifiedWeight} {t('common.kg')}</span>
+            <span>Verified Physical Weight</span>
+            <span className="font-extrabold text-emerald-700">{verifiedWeight} kg</span>
           </div>
 
-          {lot.recycler.rateBonusPercent > 0 && (
-            <div className="flex justify-between text-slate-600">
-              <span>{t('handover.bonusApplied')}</span>
-              <span className="font-semibold text-amber-700">{t('recyclerPrices.accepted')}</span>
-            </div>
-          )}
-
           <div className="flex justify-between items-center text-slate-900 border-t border-slate-200 pt-3 text-sm font-bold">
-            <span>{t('handover.finalSettlementAmount')}</span>
+            <span>Final Settlement Amount (Verified Weight × Rate)</span>
             <div className="flex items-center gap-0.5 text-2xl font-extrabold text-amber-700">
               <span>₹</span>
               <span>{calculatedFinalPayout.toLocaleString('en-IN')}</span>
@@ -209,7 +247,7 @@ export const RecyclerVerifyScreen: React.FC = () => {
         </div>
 
         <p className="text-[11px] text-slate-500 text-center italic">
-          {t('handover.italicNotice')}
+          Final payment amount is calculated exclusively on the server using physical scale weight.
         </p>
       </div>
 
@@ -221,11 +259,11 @@ export const RecyclerVerifyScreen: React.FC = () => {
           className="w-full py-4 px-5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-base shadow-sm flex items-center justify-center gap-2 transition-colors"
         >
           {isSubmitting ? (
-            <span>{t('handover.processing')}</span>
+            <span>Processing Settlement on Server...</span>
           ) : (
             <>
               <CheckCircle2 className="w-5 h-5" />
-              <span>{t('handover.confirmBtn')} (₹{calculatedFinalPayout.toLocaleString('en-IN')})</span>
+              <span>Confirm Weight & Complete Settlement (₹{calculatedFinalPayout.toLocaleString('en-IN')})</span>
             </>
           )}
         </button>
@@ -233,17 +271,16 @@ export const RecyclerVerifyScreen: React.FC = () => {
         <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-center space-y-2">
           <p className="text-emerald-900 font-bold text-sm flex items-center justify-center gap-1.5">
             <CheckCircle2 className="w-5 h-5 text-emerald-600" />
-            {t('handover.completedTitle')}
+            Transaction Completed & Audit Trail Logged
           </p>
           <button
             onClick={() => navigate('/recycler/transactions')}
             className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-xs"
           >
-            {t('handover.viewSettlementBtn')}
+            View Settlement Audit
           </button>
         </div>
       )}
     </div>
   );
 };
-
