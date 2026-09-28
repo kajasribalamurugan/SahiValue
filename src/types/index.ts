@@ -1,6 +1,18 @@
 export type UserRole = 'collector' | 'recycler';
 
-export type LotStatus = 'PENDING_HANDOVER' | 'COMPLETED' | 'CANCELLED';
+export type LotStatus =
+  | 'PENDING_ACCEPTANCE'
+  | 'ACCEPTED'
+  | 'REJECTED'
+  | 'AWAITING_HANDOVER'
+  | 'HANDOVER_IN_PROGRESS'
+  | 'PENDING_HANDOVER'
+  | 'VERIFIED'
+  | 'PAID'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'CREATED'
+  | (string & {});
 
 export interface Material {
   id: string;

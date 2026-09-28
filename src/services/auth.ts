@@ -94,6 +94,18 @@ export const authService = {
     });
   },
 
+  acceptLot: async (lotId: string): Promise<BackendLot> => {
+    return apiRequest<BackendLot>(`/lots/${lotId}/accept`, {
+      method: 'POST',
+    });
+  },
+
+  rejectLot: async (lotId: string): Promise<BackendLot> => {
+    return apiRequest<BackendLot>(`/lots/${lotId}/reject`, {
+      method: 'POST',
+    });
+  },
+
   verifyLotWeight: async (lotId: string, verifiedWeight: number): Promise<BackendLot> => {
     return apiRequest<BackendLot>(`/lots/${lotId}/verify`, {
       method: 'POST',

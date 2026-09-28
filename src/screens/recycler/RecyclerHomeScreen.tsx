@@ -11,7 +11,8 @@ import {
   MapPin, 
   PackageCheck, 
   RefreshCw,
-  AlertCircle
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 
 export const RecyclerHomeScreen: React.FC = () => {
@@ -55,7 +56,31 @@ export const RecyclerHomeScreen: React.FC = () => {
   });
 
   const collectorEntries = Array.from(collectorsMap.values());
-  const pendingQueueLots = lots.filter((l) => l.status === 'HANDOVER_PENDING' || l.status === 'VERIFIED' || l.status === 'CREATED');
+  const handleAcceptLot = async (lotId: string) => {
+    try {
+      setLoading(true);
+      await authService.acceptLot(lotId);
+      await fetchLots();
+    } catch (err: any) {
+      setError(err.message || 'Failed to accept lot.');
+      setLoading(false);
+    }
+  };
+
+  const handleRejectLot = async (lotId: string) => {
+    try {
+      setLoading(true);
+      await authService.rejectLot(lotId);
+      await fetchLots();
+    } catch (err: any) {
+      setError(err.message || 'Failed to reject lot.');
+      setLoading(false);
+    }
+  };
+
+  const pendingAcceptanceLots = lots.filter((l) => l.status === 'PENDING_ACCEPTANCE' || l.status === 'CREATED');
+  const activeHandoverLots = lots.filter((l) => l.status === 'ACCEPTED' || l.status === 'HANDOVER_PENDING' || l.status === 'HANDOVER_IN_PROGRESS' || l.status === 'VERIFIED');
+  const pendingQueueLots = activeHandoverLots;
   const totalVerifiedWeight = lots.filter(l => l.verified_weight).reduce((sum, l) => sum + (l.verified_weight || 0), 0);
   const totalPayout = lots.filter(l => l.final_amount).reduce((sum, l) => sum + (l.final_amount || 0), 0);
 
@@ -98,6 +123,64 @@ export const RecyclerHomeScreen: React.FC = () => {
           <span>{error}</span>
         </div>
       )}
+
+      {/* Available Collector Lots (Pending Acceptance) Section */}
+      <div className="fintech-card p-5 space-y-4 border-2 border-amber-400 bg-amber-50/20">
+        <div className="flex items-center justify-between border-b border-amber-200 pb-3">
+          <div>
+            <h2 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+              <PackageCheck className="w-5 h-5 text-amber-600" />
+              Available Collector Lots (Awaiting Recycler Acceptance)
+            </h2>
+            <p className="text-xs text-slate-600">Review incoming e-waste lot submissions from collectors and Accept or Reject before handover</p>
+          </div>
+          <span className="px-2.5 py-1 bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs rounded-lg">
+            {pendingAcceptanceLots.length} Pending
+          </span>
+        </div>
+
+        {pendingAcceptanceLots.length === 0 ? (
+          <div className="p-6 text-center text-slate-500 text-xs font-medium">
+            {loading ? 'Checking backend for pending lots...' : 'No pending collector lots awaiting acceptance.'}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pendingAcceptanceLots.map((lot) => (
+              <div
+                key={lot.id}
+                className="p-4 rounded-xl bg-white border border-amber-300 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs"
+              >
+                <div className="space-y-1 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-slate-900 text-sm">{lot.lot_id}</span>
+                    <StatusBadge status={lot.status} />
+                  </div>
+                  <p className="text-slate-700">Collector: <strong className="text-slate-900">{lot.collector?.name || 'Collector User'}</strong> ({lot.collector?.phone || 'No Phone'})</p>
+                  <p className="text-slate-700">Material: <strong className="text-slate-900">{lot.material?.name || 'Electronic Waste'}</strong></p>
+                  <p className="text-slate-700">Declared Weight: <strong className="text-amber-800">{lot.declared_weight} kg</strong> | Rate: <strong>₹{lot.rate}/kg</strong> | Est. Value: <strong className="text-emerald-700">₹{lot.estimated_value}</strong></p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleAcceptLot(lot.lot_id)}
+                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Accept Lot</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleRejectLot(lot.lot_id)}
+                    className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5"
+                  >
+                    <span>Reject</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Recycler KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
